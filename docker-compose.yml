@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   n8n:
-    container_name: n8n-tguide
+    container_name: hk-tour-guide-n8n
     build:
       context: .
     ports:
@@ -25,7 +25,10 @@ services:
       - HKO_LLM_FALLBACK=${HKO_LLM_FALLBACK}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     volumes:
       - ./.data/n8n_data:/root/.n8n
       - ./codebase:/data/codebase
+      - ./.git:/data/.git
+      - ./CHANGELOG:/data/CHANGELOG
     restart: unless-stopped

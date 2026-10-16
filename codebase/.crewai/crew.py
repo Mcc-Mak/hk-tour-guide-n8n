@@ -24,19 +24,68 @@ os.environ.setdefault("REQUESTS_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt"
 
 from crewai import Agent, Crew, LLM, Process, Task
 
-from tools import FileWriterTool, GitOpsTool, WebSearchTool
+from tools import FileWriterTool, GitOpsTool
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="香港建築物導賞手冊 CrewAI 執行腳本"
     )
-    parser.add_argument("--building-id", required=True, help="建築物編號")
-    parser.add_argument("--category", required=True, help="建築物分類")
-    parser.add_argument("--name", required=True, help="建築物中文名稱")
-    parser.add_argument("--address", required=True, help="建築物中文地址")
-    parser.add_argument("--english-name", default="", help="建築物英文名稱")
+    parser.add_argument("--building-id", required=True, help="建築物編號（5 位數）")
+    parser.add_argument(
+        "--category",
+        default=None,
+        help="建築物分類（法定古蹟/市區/新界），用於消歧義相同編號",
+    )
     return parser.parse_args()
+
+
+def lookup_building(building_id, category=None):
+    """從建築矩陣中查詢建築物資訊。"""
+    import re
+    try:
+        bid = f"{int(building_id):05d}"
+    except (ValueError, TypeError):
+        bid = str(building_id)
+
+    matrix_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "建築矩陣.md",
+    )
+    with open(matrix_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    section_map = {"法定古蹟": "法定古蹟", "市區": "市區", "新界": "新界"}
+    sections = re.split(r"^(?=### )", content, flags=re.MULTILINE)
+
+    for section in sections:
+        header_match = re.match(r"^### (.+)", section)
+        if not header_match:
+            continue
+        cat = section_map.get(header_match[1].strip())
+        if not cat:
+            continue
+        if category and cat != category:
+            continue
+        for line in section.split("\n"):
+            line = line.strip()
+            if not line.startswith("|") or "---" in line or "編號" in line:
+                continue
+            cells = line.split("|")
+            cells.pop(0)
+            cells.pop()
+            if len(cells) < 10:
+                continue
+            if cells[0].strip() == bid:
+                return {
+                    "building_id": bid,
+                    "category": cat,
+                    "chinese_name": cells[2].strip(),
+                    "english_name": cells[3].strip(),
+                    "chinese_address": cells[4].strip(),
+                    "english_address": cells[5].strip(),
+                }
+    raise ValueError(f"建築物 {bid}（分類：{category}）未在建築矩陣中找到")
 
 
 def load_yaml(path):
@@ -46,7 +95,6 @@ def load_yaml(path):
 
 def build_tool_registry():
     return {
-        "web_search": WebSearchTool(),
         "file_writer": FileWriterTool(),
         "git_ops": GitOpsTool(),
     }
@@ -54,17 +102,22 @@ def build_tool_registry():
 
 def build_llm(model_name, config):
     llm_cfg = config.get("llm", {})
-    base_url = os.environ.get(
-        "HKO_LLM_BASE_URL",
-        llm_cfg.get("base_url", "https://litellm.services.hko.gov.hk"),
+    base_url = os.environ.get("HKO_LLM_BASE_URL") or llm_cfg.get(
+        "base_url", "https://litellm.services.hko.gov.hk"
     )
     api_key = os.environ.get("HKO_API_KEY", "")
+    temperature = float(
+        os.environ.get("LLM_TEMPERATURE") or llm_cfg.get("temperature", 0.7)
+    )
+    max_tokens = int(
+        os.environ.get("LLM_MAX_TOKENS") or llm_cfg.get("max_tokens", 4096)
+    )
     return LLM(
         model=f"openai/{model_name}",
         base_url=base_url,
         api_key=api_key,
-        temperature=llm_cfg.get("temperature", 0.7),
-        max_tokens=llm_cfg.get("max_tokens", 4096),
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
 
@@ -129,14 +182,12 @@ def fix_markdown_format(file_path, config):
         return
 
     ff_cfg = config.get("format_fixer", {})
-    base_url = os.environ.get(
-        "HKO_LLM_BASE_URL",
-        config.get("llm", {}).get("base_url", "https://litellm.services.hko.gov.hk"),
+    base_url = os.environ.get("HKO_LLM_BASE_URL") or config.get("llm", {}).get(
+        "base_url", "https://litellm.services.hko.gov.hk"
     )
     api_key = os.environ.get("HKO_API_KEY", "")
-    model = os.environ.get(
-        "HKO_LLM_FALLBACK",
-        ff_cfg.get("model", "deepseek-ai/DeepSeek-V4-Flash-0731-Coding"),
+    model = os.environ.get("HKO_LLM_FALLBACK") or ff_cfg.get(
+        "model", "deepseek-ai/DeepSeek-V4-Flash-0731-Coding"
     )
     temperature = ff_cfg.get("temperature", 0)
     prompt = ff_cfg.get(
@@ -296,9 +347,55 @@ def extract_credibility_verdict(crew_result):
     return "failed"
 
 
+def inject_metadata_header(file_path, building_id, category, name, address, english_name, model, attempts):
+    """在 Markdown 檔案頂部注入元資料標頭。"""
+    if not file_path or not os.path.exists(file_path):
+        return
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    rel_path = file_path
+    if rel_path.startswith("導賞手冊/"):
+        rel_path = "codebase/" + rel_path
+
+    credibility_level = "種子"
+    header = (
+        f"<!--\n"
+        f"建築名稱：{name}\n"
+        f"檔案路徑：{rel_path}\n"
+        f"矩陣編號：{building_id}\n"
+        f"可信性等級：{credibility_level}\n"
+        f"模型：{model}\n"
+        f"嘗試次數：{attempts}\n"
+        f"結構：六段式標準章節 + CL 評級表 + 動態歷史檔案連結\n"
+        f"矩陣狀態：🌕 已完成\n"
+        f"-->\n\n"
+    )
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(header + content)
+
+    meta_msg = {
+        "status": "metadata_injected",
+        "file": file_path,
+        "building_id": building_id,
+        "model": model,
+        "attempts": attempts,
+    }
+    print(json.dumps(meta_msg, ensure_ascii=False), flush=True)
+
+
 def main():
     args = parse_args()
     building_id = args.building_id
+    category = args.category
+
+    # 從建築矩陣查詢建築物資訊（避免 shell injection）
+    info = lookup_building(building_id, category)
+    category = info["category"]
+    name = info["chinese_name"]
+    address = info["chinese_address"]
+    english_name = info["english_name"]
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     agents_config = load_yaml(os.path.join(script_dir, "agents.yaml"))
@@ -315,16 +412,12 @@ def main():
     backoff_seconds = retry_cfg.get("backoff_seconds", 5)
     fallback_from_attempt = retry_cfg.get("fallback_from_attempt", 3)
 
-    primary_model = os.environ.get(
-        "HKO_LLM_PRIMARY",
-        config.get("llm", {}).get("primary_model", "zai-org/GLM-5.2-FP8"),
+    primary_model = os.environ.get("HKO_LLM_PRIMARY") or config.get("llm", {}).get(
+        "primary_model", "zai-org/GLM-5.2-FP8"
     )
-    fallback_model = os.environ.get(
-        "HKO_LLM_FALLBACK",
-        config.get("llm", {}).get(
-            "fallback_model", "deepseek-ai/DeepSeek-V4-Flash-0731-Coding"
-        ),
-    )
+    fallback_model = os.environ.get("HKO_LLM_FALLBACK") or config.get(
+        "llm", {}
+    ).get("fallback_model", "deepseek-ai/DeepSeek-V4-Flash-0731-Coding")
 
     step_callback = make_step_callback(building_id)
     task_callback = make_task_callback(building_id, runs_dir)
@@ -363,26 +456,28 @@ def main():
         try:
             result = crew.kickoff(
                 inputs={
-                    "building_id": args.building_id,
-                    "category": args.category,
-                    "name": args.name,
-                    "address": args.address,
-                    "english_name": args.english_name,
+                    "building_id": building_id,
+                    "category": category,
+                    "name": name,
+                    "address": address,
+                    "english_name": english_name,
+                    "english_address": info.get("english_address", ""),
                 }
             )
             verdict = extract_credibility_verdict(result)
             if verdict == "passed":
                 output_path = get_output_path(
-                    args.category, args.building_id, args.name, args.address
+                    category, building_id, name, address
                 )
                 fix_markdown_format(output_path, config)
+                inject_metadata_header(output_path, building_id, category, name, address, english_name, model_name, attempt)
 
                 final_state = {
                     "building_id": building_id,
-                    "category": args.category,
-                    "name": args.name,
-                    "address": args.address,
-                    "english_name": args.english_name,
+                    "category": category,
+                    "name": name,
+                    "address": address,
+                    "english_name": english_name,
                     "status": "passed",
                     "attempts": attempt,
                     "model": model_name,
@@ -405,7 +500,7 @@ def main():
                     "model": model_name,
                 }
                 print(json.dumps(success_msg, ensure_ascii=False), flush=True)
-                sys.exit(0)
+                os._exit(0)
             else:
                 last_error = (
                     f"第 {attempt} 次嘗試（模型：{model_name}）："
@@ -422,10 +517,10 @@ def main():
 
     exception_log = {
         "building_id": building_id,
-        "category": args.category,
-        "name": args.name,
-        "address": args.address,
-        "english_name": args.english_name,
+        "category": category,
+        "name": name,
+        "address": address,
+        "english_name": english_name,
         "status": "failed",
         "max_attempts": max_attempts,
         "error": last_error,
@@ -442,7 +537,7 @@ def main():
         "attempts": max_attempts,
     }
     print(json.dumps(error_msg, ensure_ascii=False), flush=True)
-    sys.exit(1)
+    os._exit(1)
 
 
 if __name__ == "__main__":

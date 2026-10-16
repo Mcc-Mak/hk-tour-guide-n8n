@@ -27,5 +27,6 @@ Thumbs.db
 node_modules/
 
 # CrewAI runs (keep intermediate_research.json, ignore other logs)
-codebase/.crewai/runs/*/
-!codebase/.crewai/runs/
+codebase/.crewai/runs/**/*
+!codebase/.crewai/runs/**/
+!codebase/.crewai/runs/**/intermediate_research.json

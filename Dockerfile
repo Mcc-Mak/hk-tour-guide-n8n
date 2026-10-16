@@ -14,8 +14,18 @@ COPY codebase/.crewai/requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
 
+# Git identity for automated commits + safe directory for bind-mounted .git
+RUN git config --global user.name "n8n CrewAI Bot" && \
+    git config --global user.email "n8n-bot@hk-tour-guide.local" && \
+    git config --global --add safe.directory /data
+
+ENV GIT_DISCOVERY_ACROSS_FILESYSTEM=1
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 WORKDIR /data
 
 EXPOSE 5678
 
-CMD ["n8n", "start"]
+ENTRYPOINT ["/entrypoint.sh"]

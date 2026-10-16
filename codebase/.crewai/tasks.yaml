@@ -8,30 +8,60 @@ research_task:
     - 分類：{category}
 
     研究範圍：建築物基本資料（興建年份、建築師、建築風格）、歷史背景與社會脈絡、建築特色與技術、文化意義與保育狀況。
-    所有事實陳述必須附上可查證的來源連結。
+    所有事實陳述應標註資訊來源機構（如古物古蹟辦事處、差餉物業估價署、屋宇署等）。
+    對於不確定的事實，必須明確標註「待查證」，嚴禁編造資訊或來源。
+
+    【地理座標 — 強制要求】
+    你必須提供建築物的概略地理座標（latitude, longitude），以十進位度數表示。
+    以你對香港地理的知識估算，精度到小數點後 4 位（如 22.3693, 114.1136）。
+    座標將用於生成 OpenStreetMap 連結。
+
+    【超連結政策 — 嚴格限制】
+    嚴禁編造或推測任何 URL。若需引用資訊來源：
+    - 僅可使用你確信存在的官方頁面 URL
+    - 若不確定具體 URL，改為標註機構名稱（如「古物古蹟辦事處」）
+    - 不得使用泛泛的機構首頁 URL 作為特定建築物的來源
   expected_output: >
-    JSON 格式的結構化研究報告，包含 building_info、historical_context、architectural_features、cultural_significance、sources。
+    JSON 格式的結構化研究報告，包含 building_info、historical_context、architectural_features、cultural_significance、sources、coordinates。
+    sources 為資訊來源機構名稱清單（如 ["古物古蹟辦事處", "差餉物業估價署"]），嚴禁包含未經驗證的 URL。
+    coordinates 為 {"latitude": 22.xxxx, "longitude": 114.xxxx}。
   agent: archival_researcher
 
 credibility_task:
   description: >
-    以硬關卡標準審查上述研究報告。檢查：每項事實陳述是否有可驗證來源、來源是否權威、是否存在未經證實的推測。
+    以硬關卡標準審查上述研究報告。檢查：
+    事實陳述的內部一致性（各項資料是否互相矛盾）、日期與建築風格是否合理、
+    是否存在明顯的 AI 幻覺（如不存在的建築師名稱或不可能的年份）、
+    研究員是否對不確定資訊誠實標註「待查證」。
+
+    【超連結查核 — 強制要求】
+    逐一檢查報告中所有超連結（URL）：
+    1. 可達性：URL 是否指向真實存在的頁面（從訓練資料判斷）。推測性 URL 一律判為不可達。
+    2. 相關性：URL 內容是否與該建築物直接相關。泛泛的機構首頁或通用服務頁判為不相關。
+    3. 若任何 URL 不可達或不相關，verdict 必須為 "failed"。
+
     你必須輸出嚴格的 JSON，格式為：{"verdict": "passed" 或 "failed", "issues": [...], "confidence_score": 0-100}
   expected_output: >
-    嚴格 JSON：verdict（passed/failed）、issues（問題清單）、confidence_score（0-100）。
+    嚴格 JSON：verdict（passed/failed）、issues（問題清單，含問題 URL）、confidence_score（0-100）。
   agent: credibility_assessor
 
 documentation_task:
   description: >
     將通過硬關卡審查的 {name}（{english_name}）研究轉化為 Markdown 導賞手冊。
     必須採用以下六大章節結構（依序）：
-    一、導賞概覽與地址資訊（含建築基本資料表、導賞路線建議）
+    一、導賞概覽與地址資訊（含建築基本資料表、導賞路線建議、OpenStreetMap 地圖連結）
     二、歷史脈絡與建築特色（建築風格與特色、歷史事件與背景）
     三、事實查核與可信度評級表 CL 1-5（歷史數據查核結果表、AI 幻覺過濾檢測報告、整體可信度評級表）
     四、歷史檔案狀態宣告（可信性等級、歷史檔案連結清單）
     五、導賞員現場講稿（開場白、各站點觀察重點與歷史故事、結語）
     六、參考資料來源（官方檔案連結清單、參考文獻清單表）
+
+    【OpenStreetMap 地圖連結 — 強制要求】
+    在第一章節必須包含以下格式的地圖連結（使用研究報告提供的座標）：
+    https://www.openstreetmap.org/#map=19/{latitude}/{longitude}&layers=S
+
     使用 file_writer 工具寫入檔案，傳入 building_id={building_id}、category={category}、name={name}、address={address}。
   expected_output: >
     完整的 Markdown 檔案，寫入正確的分類路徑。檔名格式為：5位數編號-中文名稱-中文地址.md。
+    第一章節必須包含 OSM 地圖連結。嚴禁包含未經可信性評估員查核通過的 URL。
   agent: documentation_writer
