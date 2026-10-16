@@ -1,0 +1,37 @@
+research_task:
+  description: >
+    針對以下建築物進行歷史檔案研究：
+    - 編號：{building_id}
+    - 中文名稱：{name}
+    - 英文名稱：{english_name}
+    - 中文地址：{address}
+    - 分類：{category}
+
+    研究範圍：建築物基本資料（興建年份、建築師、建築風格）、歷史背景與社會脈絡、建築特色與技術、文化意義與保育狀況。
+    所有事實陳述必須附上可查證的來源連結。
+  expected_output: >
+    JSON 格式的結構化研究報告，包含 building_info、historical_context、architectural_features、cultural_significance、sources。
+  agent: archival_researcher
+
+credibility_task:
+  description: >
+    以硬關卡標準審查上述研究報告。檢查：每項事實陳述是否有可驗證來源、來源是否權威、是否存在未經證實的推測。
+    你必須輸出嚴格的 JSON，格式為：{"verdict": "passed" 或 "failed", "issues": [...], "confidence_score": 0-100}
+  expected_output: >
+    嚴格 JSON：verdict（passed/failed）、issues（問題清單）、confidence_score（0-100）。
+  agent: credibility_assessor
+
+documentation_task:
+  description: >
+    將通過硬關卡審查的 {name}（{english_name}）研究轉化為 Markdown 導賞手冊。
+    必須採用以下六大章節結構（依序）：
+    一、導賞概覽與地址資訊（含建築基本資料表、導賞路線建議）
+    二、歷史脈絡與建築特色（建築風格與特色、歷史事件與背景）
+    三、事實查核與可信度評級表 CL 1-5（歷史數據查核結果表、AI 幻覺過濾檢測報告、整體可信度評級表）
+    四、歷史檔案狀態宣告（可信性等級、歷史檔案連結清單）
+    五、導賞員現場講稿（開場白、各站點觀察重點與歷史故事、結語）
+    六、參考資料來源（官方檔案連結清單、參考文獻清單表）
+    使用 file_writer 工具寫入檔案，傳入 building_id={building_id}、category={category}、name={name}、address={address}。
+  expected_output: >
+    完整的 Markdown 檔案，寫入正確的分類路徑。檔名格式為：5位數編號-中文名稱-中文地址.md。
+  agent: documentation_writer

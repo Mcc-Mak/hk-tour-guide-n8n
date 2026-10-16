@@ -1,0 +1,129 @@
+## [0.4.9] - 2026-10-16
+
+### Added
+
+- feat(building): add biography and tour guide for building 00005
+
+## [0.4.8] - 2026-10-16
+
+### Added
+
+- feat(building): add biography and tour guide for building 00002
+
+## [0.4.7] - 2026-10-16
+
+### Added
+
+- feat(building): add biography and tour guide for building 00001
+
+## [0.4.6] - 2026-10-16
+
+### Added
+
+- feat(building): add biography and tour guide for building 00002
+
+## [0.4.5] - 2026-10-16
+
+### Added
+
+- feat(building): add biography and tour guide for building 00001
+
+# Changelog
+
+本專案所有顯著變更均記錄於此檔案。
+
+格式基於 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.1.0/)，
+並遵循 [語意化版本號](https://semver.org/lang/zh-TW/)。
+
+## [0.4.4] - 2024-10-14
+
+### Fixed
+- 啟用 n8n 2.0+ 預設封鎖的節點：設定 `NODES_EXCLUDE=[]`，讓 Execute Command（`n8n-nodes-base.executeCommand`）節點可被辨識並發佈（原「Unrecognized node type」錯誤）
+
+## [0.4.3] - 2024-10-14
+
+### Fixed
+- 修正 n8n 容器資料持久化：容器以 root 執行，n8n 資料庫實際寫於 `/root/.n8n`，`docker-compose.yml` 掛載由 `/home/node/.n8n` 改為 `/root/.n8n`，確保重建容器後資料不遺失
+- 文檔全面繁體中文校對：修正 `規模化`（原簡體「规模化」）等殘留簡體字
+
+## [0.4.2] - 2024-10-14
+
+### Changed
+- 統一硬關卡重試語意為「**1 次初試 + 4 次重試（共 5 次嘗試）**」，與 `config.yaml` 之 `retry.max_attempts: 5` 對齊
+- 修正 `codebase/AGENTS.md` 及全部文檔（README、charter、srs、prd、pdr、adr、edr、api、schema、settings、rtm、user-stories、deployment）中「重試三次」等不一致描述
+
+## [0.4.1] - 2024-10-14
+
+### Changed
+- 強化 Root/Codebase 治理解耦：`AGENTS.md`（W1）新增 GitHub Actions 章節，明確 `codebase/.crewai/` 為建構代理角色
+- 對齊 `AGENTS.md` 與 `codebase/AGENTS.md` 格式：皆以 `文件引用鏈` 收尾、皆含 GitHub Actions 章節、`硬性約束（{層}）` 標題一致
+
+### Added
+- `codebase/AGENTS.md` 新增「文件引用鏈（Codebase 層）」
+
+## [0.4.0] - 2024-10-14
+
+### Changed
+- 重構為 Recursive Agentic Sandbox (RAS) 兩工作流治理：Root（Workflow-1 啟動階段）與 Codebase（Workflow-2 專案階段）邏輯分離
+- `AGENTS.md` 收斂為 Workflow-1 基礎設施治理；專案治理移至新增的 `codebase/AGENTS.md`
+- `codebase/.crew/` 重新命名為 `codebase/.crewai/`（更新 Dockerfile、n8n 工作流、config.yaml、.gitignore 及全部文檔引用）
+- mdBook 來源移至 `codebase/site/`（`book.toml`、`SUMMARY.md`），GHA build-deploy 改於 `codebase/site/` 建置
+
+### Added
+- 根層 `docs/`（`charter.md`、`srs.md`、`crm.md`）— 描述沙盒／基礎設施
+- 根層 `toc.md` — 根索引
+- `codebase/AGENTS.md` — Workflow-2 專案治理
+- `codebase/site/` — mdBook 輸出
+
+## [0.3.2] - 2024-10-14
+
+### Changed
+- n8n 設定 `N8N_SECURE_COOKIE=false` — HTTP 部署下停用安全 Cookie，避免 Safari／非 localhost 存取警告
+- `docker-compose.yml`、`.env.example`、`configurations.md`、`settings.md` 同步更新
+
+## [0.3.1] - 2024-10-14
+
+### Changed
+- CrewAI 重試策略改為最多 **5 次**嘗試：第 1–3 次使用 `zai-org/GLM-5.2-FP8`，第 4–5 次切換至 `deepseek-ai/DeepSeek-V4-Flash-0731-Coding`
+- `config.yaml`：`retry.max_attempts: 5`、`retry.fallback_from_attempt: 4`
+
+### Added
+- 明確「每次嘗試目的相同」：第 1–5 次皆執行相同 Crew 流程（僅模型不同），不漂移任務目的
+- 明確「成功即中止（Short-circuit）」：任一次通過硬關卡即停止後續嘗試（`crew.py` 於 `verdict == "passed"` 立即 `sys.exit(0)`）
+- AGENTS.md 補充短截與目的一致性規則
+
+## [0.3.0] - 2024-10-14
+
+### Changed
+- LLM 提供者從 OpenAI 改為 HKO 自架 LiteLLM Proxy（OpenAI 兼容）
+- CrewAI 重試策略：第 1–2 次使用 `zai-org/GLM-5.2-FP8`，第 3 次切換至 `deepseek-ai/DeepSeek-V4-Flash-0731-Coding`
+- 所有非 CrewAI 提示（含格式修復）使用 `deepseek-ai/DeepSeek-V4-Flash-0731-Coding`
+
+### Added
+- 格式修復步驟（Format Fixer）— 硬關卡通過後以 `HKO_LLM_FALLBACK` 修復 Markdown 格式（僅格式，不修改內容）
+- `HKO_API_KEY`、`HKO_LLM_BASE_URL`、`HKO_LLM_PRIMARY`、`HKO_LLM_FALLBACK` 環境變數
+- `config.yaml` 新增 `format_fixer` 區塊與 `retry.fallback_from_attempt`
+- `requirements.txt` 新增 `openai` 套件
+- AGENTS.md 新增「LLM 模型策略」章節
+
+### Fixed
+- `file_writer.py` 路徑修正（移除多餘的 `codebase/` 前綴）
+- `docker-compose.yml` 新增 HKO LLM 環境變數傳遞至容器
+
+## [0.2.0] - 2024-10-14
+
+### Added
+- n8n 工作流 JSON (codebase/.n8n/hk-building-biography-workflow.json)
+- CrewAI 設定 (codebase/.crewai/ — agents, tasks, tools, crew.py, config)
+- 完整文檔集 (codebase/docs/ — 15 份文件)
+- codebase/toc.md 目錄樹
+- README.md 專案說明
+- Docker 基礎設施 (docker-compose.yml, Dockerfile, .env.example)
+- GHA 統合流水線 (.github/workflows/gh-pipeline.yml)
+- 根目錄檔案 (CHANGELOG, DESCRIPTION, LICENSE, .gitignore)
+
+## [0.1.0] - 2024-10-14
+
+### Added
+- AGENTS.md — 兩階段架構、硬性約束、目錄結構、可觀測性、GHA 管線
+- codebase/建築矩陣.md — 合併市區(10,263)/新界(5,576)/法定古蹟(166)三大來源，去重後共 16,005 筆

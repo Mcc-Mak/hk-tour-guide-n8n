@@ -1,0 +1,605 @@
+{
+  "name": "香港建築物導賞傳記工作流",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hk-building-tour",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "b2c3d4e5-f6a7-8901-bcde-f12345670012"
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-ef12345670002",
+      "name": "讀取建築矩陣",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "command": "cat \"/data/codebase/建築矩陣.md\""
+      }
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456700023",
+      "name": "解析建築矩陣",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst markdown = items[0].json.stdout || '';\nconst buildings = [];\n\n// 從 webhook body 讀取設定參數（含預設值）\nconst body = $node['Webhook'].json.body || {};\nconst skipCompleted = body.skip_completed !== undefined ? body.skip_completed : true;\nconst startCategory = body.start_category || '法定古蹟';\nconst startNumber = body.start_number || '00001';\nconst priorityBuildings = body.priority_buildings || [];\n\nconst categoryOrder = ['法定古蹟', '市區', '新界'];\nconst startCatIdx = categoryOrder.indexOf(startCategory);\nif (startCatIdx === -1) startCatIdx = 0;\n\nconst sectionMap = {'法定古蹟':'法定古蹟','市區':'市區','新界':'新界'};\nconst sections = markdown.split(/^(?=### )/m);\nconst allParsed = [];\n\nfor (const section of sections) {\n  const headerMatch = section.match(/^### (.+)/);\n  if (!headerMatch) continue;\n  const category = sectionMap[headerMatch[1].trim()];\n  if (!category) continue;\n  const lines = section.split('\\n');\n  for (const line of lines) {\n    const trimmed = line.trim();\n    if (!trimmed.startsWith('|')) continue;\n    if (trimmed.includes('---')) continue;\n    if (trimmed.includes('編號')) continue;\n    const rawCells = trimmed.split('|');\n    rawCells.shift(); rawCells.pop();\n    if (rawCells.length < 10) continue;\n    const buildingId = rawCells[0].trim();\n    if (!/^\\d+$/.test(buildingId)) continue;\n    const status = rawCells[8].trim();\n    allParsed.push({\n      building_id: buildingId,\n      category: category,\n      chinese_name: rawCells[2].trim(),\n      english_name: rawCells[3].trim(),\n      chinese_address: rawCells[4].trim(),\n      english_address: rawCells[5].trim(),\n      status: status,\n      is_completed: status.includes('已完成')\n    });\n  }\n}\n\n// 1) 優先處理 priority_buildings 清單\nconst prioritySet = new Set(priorityBuildings.map(String));\nconst priorityItems = allParsed.filter(b => prioritySet.has(String(b.building_id)));\n\n// 2) 依分類順序 + 起始編號篩選\nconst filteredItems = allParsed.filter(b => {\n  const catIdx = categoryOrder.indexOf(b.category);\n  if (catIdx < startCatIdx) return false;\n  if (catIdx === startCatIdx && parseInt(b.building_id) < parseInt(startNumber)) return false;\n  if (skipCompleted && b.is_completed) return false;\n  if (prioritySet.has(String(b.building_id))) return false;\n  return true;\n});\n\nconst finalBuildings = [...priorityItems, ...filteredItems];\nfor (const b of finalBuildings) {\n  buildings.push({json: {\n    building_id: b.building_id, category: b.category,\n    chinese_name: b.chinese_name, english_name: b.english_name,\n    chinese_address: b.chinese_address, english_address: b.english_address,\n    is_completed: b.is_completed\n  }});\n}\nif (buildings.length > 0) {\n  buildings[0].json._filter_summary = {\n    skip_completed: skipCompleted, start_category: startCategory,\n    start_number: startNumber, priority_count: priorityItems.length,\n    total_filtered: buildings.length\n  };\n}\nreturn buildings;"
+      }
+    },
+    {
+      "id": "e5f6a7b8-c9d0-1234-efab-345670000045",
+      "name": "逐建築物迭代",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "pm01-0001-0000-0000-000000000001",
+      "name": "PM：建立建築物 Issue",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "command": "={{ 'cd /data/codebase && gh issue create --repo Mcc-Mak/hk-tour-guide-n8n --title \"建築物 ' + $json.building_id + '：' + $json.chinese_name + '\" --body \"## 建築物資訊\\n- 編號：' + $json.building_id + '\\n- 中文名稱：' + $json.chinese_name + '\\n- 英文名稱：' + $json.english_name + '\\n- 中文地址：' + $json.chinese_address + '\\n- 分類：' + $json.category + '\\n\\n## 狀態\\n- [ ] CrewAI 歷史研究\\n- [ ] 硬關卡審查\\n- [ ] 導賞手冊產出\\n- [ ] Git 提交推送\\n\" --label building 2>&1 || echo ISSUE_EXISTS' }}"
+      }
+    },
+    {
+      "id": "rs01-0001-0000-0000-000000000001",
+      "name": "還原建築物資料",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "rs01-001",
+              "name": "building_id",
+              "value": "={{ $('逐建築物迭代').item.json.building_id }}",
+              "type": "string"
+            },
+            {
+              "id": "rs01-002",
+              "name": "category",
+              "value": "={{ $('逐建築物迭代').item.json.category }}",
+              "type": "string"
+            },
+            {
+              "id": "rs01-003",
+              "name": "chinese_name",
+              "value": "={{ $('逐建築物迭代').item.json.chinese_name }}",
+              "type": "string"
+            },
+            {
+              "id": "rs01-004",
+              "name": "english_name",
+              "value": "={{ $('逐建築物迭代').item.json.english_name }}",
+              "type": "string"
+            },
+            {
+              "id": "rs01-005",
+              "name": "chinese_address",
+              "value": "={{ $('逐建築物迭代').item.json.chinese_address }}",
+              "type": "string"
+            },
+            {
+              "id": "rs01-006",
+              "name": "english_address",
+              "value": "={{ $('逐建築物迭代').item.json.english_address }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f6a7b8c9-d0e1-2345-fabc-456700000567",
+      "name": "設定建築物變數",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1664,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000001",
+              "name": "building_id",
+              "value": "={{ $json.building_id }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000002",
+              "name": "category",
+              "value": "={{ $json.category }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000003",
+              "name": "chinese_name",
+              "value": "={{ $json.chinese_name }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000004",
+              "name": "english_name",
+              "value": "={{ $json.english_name }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000005",
+              "name": "chinese_address",
+              "value": "={{ $json.chinese_address }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000006",
+              "name": "english_address",
+              "value": "={{ $json.english_address }}",
+              "type": "string"
+            },
+            {
+              "id": "aa11bb22-cc33-dd44-ee55-ff660000007",
+              "name": "crewai_command",
+              "value": "={{ 'cd /data/codebase && python3 .crewai/crew.py --building-id \"' + $json.building_id + '\" --category \"' + $json.category + '\" --name \"' + $json.chinese_name + '\" --address \"' + $json.chinese_address + '\" --english-name \"' + $json.english_name + '\"' 2>&1 }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a7b8c9d0-e1f2-3456-abcd-567000006789",
+      "name": "執行 CrewAI 研究",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        300
+      ],
+      "parameters": {
+        "command": "={{ $json.crewai_command }}"
+      }
+    },
+    {
+      "id": "b8c9d0e1-f2a3-4567-bcde-670000078901",
+      "name": "解析 CrewAI 輸出",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst stdout = items[0].json.stdout || '';\nconst exitCode = items[0].json.exitCode;\nconst stderr = items[0].json.stderr || '';\nconst buildingId = $('設定建築物變數').item.json.building_id;\nlet result = {building_id: buildingId, exit_code: exitCode, raw_stdout: stdout, status: 'unknown', error: null, logs: []};\nif (exitCode !== 0) {\n  result.status = 'failed'; result.error = 'CrewAI exited with code ' + exitCode;\n  result.logs.push({type: 'error', message: stderr || 'Unknown error'});\n  return [{json: result}];\n}\ntry {\n  const lines = stdout.trim().split('\\n');\n  for (const line of lines) {\n    const t = line.trim(); if (!t) continue;\n    try { const p = JSON.parse(t); result.logs.push(p); if (p.status) result.status = p.status; if (p.verdict) result.status = p.verdict === 'passed' ? 'passed' : 'failed'; } catch(e) { result.logs.push({type:'text',message:t}); }\n  }\n} catch(e) { result.error = e.message; }\nreturn [{json: result}];"
+      }
+    },
+    {
+      "id": "c9d0e1f2-a3b4-5678-cdef-700000089012",
+      "name": "載入中介研究",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        300
+      ],
+      "parameters": {
+        "command": "={{ 'cat \"/data/codebase/.crewai/runs/' + $json.building_id + '/intermediate_research.json\"' }}"
+      }
+    },
+    {
+      "id": "d0e1f2a3-b4c5-6789-defa-800000090123",
+      "name": "檢查研究狀態",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all();\nconst stdout = items[0].json.stdout || '';\nconst exitCode = items[0].json.exitCode;\nconst buildingId = $('設定建築物變數').item.json.building_id;\nlet result = {building_id: buildingId, status: 'failed', verdict: 'unknown', issues: [], confidence_score: 0};\nif (exitCode !== 0 || !stdout.trim()) { result.issues.push({description:'intermediate_research.json empty or missing'}); return [{json: result}]; }\ntry {\n  const r = JSON.parse(stdout);\n  if (r.status) result.status = r.status;\n  if (r.verdict) { result.verdict = r.verdict; result.status = r.verdict === 'passed' ? 'passed' : 'failed'; }\n  if (r.credibility_task) { const ct = r.credibility_task; if (ct.verdict) { result.verdict = ct.verdict; result.status = ct.verdict === 'passed' ? 'passed' : 'failed'; } if (ct.issues) result.issues = ct.issues; if (ct.confidence_score !== undefined) result.confidence_score = ct.confidence_score; }\n  if (r.research_task && r.research_task.sources) result.sources_count = r.research_task.sources.length;\n  if (r.retry_count !== undefined) result.retry_count = r.retry_count;\n} catch(e) { result.status = 'failed'; result.issues.push({description:'Parse error: '+e.message}); }\nreturn [{json: result}];"
+      }
+    },
+    {
+      "id": "e1f2a3b4-c5d6-7890-efab-900000012345",
+      "name": "條件：硬關卡通過？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "f2a3b4c5-d6e7-8901-fabc-a000000123456",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "passed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "um01-0001-0000-0000-000000000001",
+      "name": "更新建築矩陣",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        500
+      ],
+      "parameters": {
+        "command": "={{ 'cd /data/codebase && python3 .crewai/tools/update_matrix.py \"' + $json.building_id + '\" \"' + $('設定建築物變數').item.json.chinese_name + '\" \"' + $('設定建築物變數').item.json.chinese_address + '\" \"' + $('設定建築物變數').item.json.category + '\"' }}"
+      }
+    },
+    {
+      "id": "f2a3b4c5-d6e7-8901-abcd-b000000234567",
+      "name": "Git 提交推送",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3328,
+        500
+      ],
+      "parameters": {
+        "command": "={{ 'cd /data/codebase && git add \"導賞手冊/\" && git add \".crewai/runs/' + $json.building_id + '/\" && git commit -m \"feat(building): add biography and tour guide for ' + $('設定建築物變數').item.json.chinese_name + '\" && git push origin dev-001' }}"
+      }
+    },
+    {
+      "id": "a3b4c5d6-e7f8-9012-bcde-c000000345678",
+      "name": "更新 CHANGELOG",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3568,
+        500
+      ],
+      "parameters": {
+        "command": "cd /data/codebase && BID=\"{{ $json.building_id }}\" && CURR=$(grep -oP '## \\\\[\\\\K[0-9]+\\\\.[0-9]+\\\\.[0-9]+' CHANGELOG | head -1) && IFS=. read MAJOR MINOR PATCH <<< \"$CURR\" && PATCH=$((PATCH+1)) && VER=\"${MAJOR}.${MINOR}.${PATCH}\" && DATE=$(date +%Y-%m-%d) && TEMP=$(mktemp) && printf '## [%s] - %s\\n\\n### Added\\n\\n- feat(building): add biography and tour guide for building %s\\n\\n' \"$VER\" \"$DATE\" \"$BID\" | cat - CHANGELOG > \"$TEMP\" && mv \"$TEMP\" CHANGELOG && echo \"CHANGELOG updated to $VER\""
+      }
+    },
+    {
+      "id": "b4c5d6e7-f8a9-0123-cdef-d000000456789",
+      "name": "PM：關閉建築物 Issue",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3808,
+        500
+      ],
+      "parameters": {
+        "command": "={{ 'cd /data/codebase && ISSUE_NUM=$(gh issue list --repo Mcc-Mak/hk-tour-guide-n8n --search \"建築物 ' + $json.building_id + '\" --state open --json number --limit 1 -q \".[0].number\" 2>/dev/null) && if [ -n \"$ISSUE_NUM\" ]; then gh issue close $ISSUE_NUM --repo Mcc-Mak/hk-tour-guide-n8n --comment \"✅ 建築物 ' + $json.building_id + '（' + $('設定建築物變數').item.json.chinese_name + '）導賞手冊已完成。\" 2>/dev/null; fi && gh project item-add 11 --owner Mcc-Mak --url \"https://github.com/Mcc-Mak/hk-tour-guide-n8n/issues/$ISSUE_NUM\" 2>/dev/null; echo \"PM 同步完成：建築物 ' + $json.building_id + '\"' }}"
+      }
+    },
+    {
+      "id": "c5d6e7f8-a9b0-1234-efab-e000000567890",
+      "name": "寫入例外日誌",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3104,
+        100
+      ],
+      "parameters": {
+        "command": "cd /data/codebase && mkdir -p \".crewai/runs/{{ $json.building_id }}\" && echo \"FAILED: Building {{ $json.building_id }} - Verdict: {{ $json.verdict }} - Issues: {{ $json.issues.length }} - $(date -Iseconds)\" >> \".crewai/runs/{{ $json.building_id }}/exception_log.txt\" && echo \"Exception log written for building {{ $json.building_id }}\""
+      }
+    },
+    {
+      "id": "d6e7f8a9-b0c1-2345-fabc-f000000678901",
+      "name": "PM：標記建築物 Issue 為跳過",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        3344,
+        100
+      ],
+      "parameters": {
+        "command": "={{ 'cd /data/codebase && ISSUE_NUM=$(gh issue list --repo Mcc-Mak/hk-tour-guide-n8n --search \"建築物 ' + $json.building_id + '\" --state open --json number --limit 1 -q \".[0].number\" 2>/dev/null) && if [ -n \"$ISSUE_NUM\" ]; then gh issue close $ISSUE_NUM --repo Mcc-Mak/hk-tour-guide-n8n --comment \"⏭️ 建築物 ' + $json.building_id + '（' + $('設定建築物變數').item.json.chinese_name + '）硬關卡未通過，已跳過。\" --reason not_planned 2>/dev/null; fi; echo \"PM 跳過同步完成：建築物 ' + $json.building_id + '\"' }}"
+      }
+    },
+    {
+      "id": "e7f8a9b0-c1d2-3456-abcd-f000000789012",
+      "name": "失敗跳過建築物",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3584,
+        100
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f8a9b0c1-d2e3-4567-abcd-f000000890123",
+      "name": "最終摘要",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        600
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allBuildings = $('解析建築矩陣').all();\nreturn [{json: {summary: '香港建築物導賞傳記工作流執行完成', total_buildings: allBuildings.length, completed_at: new Date().toISOString(), message: '所有建築物已處理完畢。請查看 git log 與 CHANGELOG。'}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "讀取建築矩陣",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "讀取建築矩陣": {
+      "main": [
+        [
+          {
+            "node": "解析建築矩陣",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析建築矩陣": {
+      "main": [
+        [
+          {
+            "node": "逐建築物迭代",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "逐建築物迭代": {
+      "main": [
+        [
+          {
+            "node": "PM：建立建築物 Issue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "最終摘要",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PM：建立建築物 Issue": {
+      "main": [
+        [
+          {
+            "node": "還原建築物資料",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "設定建築物變數": {
+      "main": [
+        [
+          {
+            "node": "執行 CrewAI 研究",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "執行 CrewAI 研究": {
+      "main": [
+        [
+          {
+            "node": "解析 CrewAI 輸出",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析 CrewAI 輸出": {
+      "main": [
+        [
+          {
+            "node": "載入中介研究",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "載入中介研究": {
+      "main": [
+        [
+          {
+            "node": "檢查研究狀態",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查研究狀態": {
+      "main": [
+        [
+          {
+            "node": "條件：硬關卡通過？",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "條件：硬關卡通過？": {
+      "main": [
+        [
+          {
+            "node": "更新建築矩陣",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "寫入例外日誌",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Git 提交推送": {
+      "main": [
+        [
+          {
+            "node": "更新 CHANGELOG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新 CHANGELOG": {
+      "main": [
+        [
+          {
+            "node": "PM：關閉建築物 Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PM：關閉建築物 Issue": {
+      "main": [
+        [
+          {
+            "node": "逐建築物迭代",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "寫入例外日誌": {
+      "main": [
+        [
+          {
+            "node": "PM：標記建築物 Issue 為跳過",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PM：標記建築物 Issue 為跳過": {
+      "main": [
+        [
+          {
+            "node": "失敗跳過建築物",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "失敗跳過建築物": {
+      "main": [
+        [
+          {
+            "node": "逐建築物迭代",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新建築矩陣": {
+      "main": [
+        [
+          {
+            "node": "Git 提交推送",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "還原建築物資料": {
+      "main": [
+        [
+          {
+            "node": "設定建築物變數",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

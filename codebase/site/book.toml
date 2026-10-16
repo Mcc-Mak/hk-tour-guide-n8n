@@ -1,0 +1,7 @@
+[book]
+title = "香港建築物導賞手冊"
+language = "zh"
+src = "."
+
+[build]
+build-dir = "book"

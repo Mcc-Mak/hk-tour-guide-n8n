@@ -1,0 +1,38 @@
+crew:
+  process: "sequential"
+  verbose: false
+  memory: false
+  max_rpm: 10
+
+llm:
+  base_url: "${HKO_LLM_BASE_URL:https://litellm.services.hko.gov.hk}"
+  primary_model: "${HKO_LLM_PRIMARY:zai-org/GLM-5.2-FP8}"
+  fallback_model: "${HKO_LLM_FALLBACK:deepseek-ai/DeepSeek-V4-Flash-0731-Coding}"
+  temperature: 0.7
+  max_tokens: 8000
+
+format_fixer:
+  model: "${HKO_LLM_FALLBACK:deepseek-ai/DeepSeek-V4-Flash-0731-Coding}"
+  temperature: 0
+  prompt: >
+    你是 Markdown 格式修復工具。僅修復格式問題，嚴禁新增、刪除或修改任何內容。
+    修復範圍包括：標題層級、列表縮排、表格對齊、空行、連結語法等。
+    特別注意表格欄位漂移：若因空值、null 或空字串導致表格欄位錯位，
+    修復欄位對齊使其與表頭一致，但不得更改任何儲存格的內容。
+    輸出完整的修復後 Markdown。
+
+output:
+  format: "json"
+  save_intermediate: true
+  intermediate_path: "codebase/.crewai/runs"
+
+retry:
+  max_attempts: 5
+  backoff_seconds: 5
+  fallback_from_attempt: 4
+
+filter:
+  skip_completed: true
+  start_category: "法定古蹟"
+  start_number: "00001"
+  priority_buildings: []

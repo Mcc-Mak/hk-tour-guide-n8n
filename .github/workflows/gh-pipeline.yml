@@ -1,0 +1,141 @@
+name: HK Tour Guide Pipeline
+
+on:
+  push:
+    branches:
+      - dev-001
+      - main
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev-001'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dev-001
+        uses: actions/checkout@v4
+        with:
+          ref: dev-001
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "Mcc-Mak"
+          git config user.email "Mcc-Mak@users.noreply.github.com"
+
+      - name: Merge dev-001 into dev
+        run: |
+          git checkout dev
+          git merge dev-001 --no-edit
+          git push origin dev
+
+      - name: Merge dev into main
+        run: |
+          git checkout main
+          git merge dev --no-edit
+          git push origin main
+
+  quality-gate:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=hk-tour-guide-n8n
+
+  build-deploy:
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: 'latest'
+
+      - name: Build mdBook
+        working-directory: codebase/site
+        run: mdbook build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./codebase/site/book
+
+  pm-sync:
+    needs: build-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install gh CLI
+        run: gh --version
+
+      - name: Close related issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git log --format='%B' -50 | grep -oiE '(closes|fixes|resolves) #[0-9]+' | grep -oE '[0-9]+' | sort -u | while read -r num; do
+            gh issue close "$num" --comment "Pipeline completed successfully"
+          done
+
+      - name: Sync GitHub Project board
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+        continue-on-error: true
+        run: |
+          if [ -z "$PROJECT_NUMBER" ]; then
+            echo "PROJECT_NUMBER not configured; skipping project board sync"
+            exit 0
+          fi
+          gh project item-list "$PROJECT_NUMBER" --owner "${{ github.repository_owner }}" --limit 100 --format json | jq -r '.[].content.number // empty' | while read -r num; do
+            gh issue edit "$num" --add-label "pipeline-done" || true
+          done

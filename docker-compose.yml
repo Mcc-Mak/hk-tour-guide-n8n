@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  n8n:
+    container_name: n8n-tguide
+    build:
+      context: .
+    ports:
+      - "45678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=http://0.0.0.0:45678/webhook
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_API_KEY=${N8N_API_KEY}
+      - NODES_EXCLUDE=${NODES_EXCLUDE}
+      - GENERIC_TIMEZONE=Asia/Hong_Kong
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - HKO_API_KEY=${HKO_API_KEY}
+      - HKO_LLM_BASE_URL=${HKO_LLM_BASE_URL}
+      - HKO_LLM_PRIMARY=${HKO_LLM_PRIMARY}
+      - HKO_LLM_FALLBACK=${HKO_LLM_FALLBACK}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS}
+    volumes:
+      - ./.data/n8n_data:/root/.n8n
+      - ./codebase:/data/codebase
+    restart: unless-stopped
